@@ -1,0 +1,22 @@
+// TaskCircle — Prisma Schema
+// Phase 1: Minimal placeholder schema for foundation setup
+// The production schema will be designed during the appropriate development phase
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Placeholder model to verify Prisma configuration
+// This will be replaced with the real schema in Phase 2+
+model User {
+  id        String   @id @default(cuid())
+  email     String?  @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

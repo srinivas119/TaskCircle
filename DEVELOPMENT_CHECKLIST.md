@@ -3,13 +3,13 @@
 ---
 
 ## Phase 1 — Project Setup
-- [ ] Repository setup
-- [ ] Frontend setup
-- [ ] Backend setup
-- [ ] Database setup
-- [ ] Prisma setup
-- [ ] Environment configuration
-- [ ] Initial documentation (`README.md`, `/docs/`)
+- [x] Repository setup
+- [x] Frontend setup
+- [x] Backend setup
+- [x] Database setup
+- [x] Prisma setup
+- [x] Environment configuration
+- [x] Initial documentation (`README.md`, `/docs/`)
 
 ---
 
