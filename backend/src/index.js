@@ -1,9 +1,11 @@
 import 'dotenv/config';
 import express from 'express';
+import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import healthRoutes from './routes/health.js';
+import authRoutes from './routes/auth.js';
 import errorHandler from './middleware/errorHandler.js';
 
 const app = express();
@@ -18,11 +20,13 @@ app.use(
   })
 );
 app.use(morgan('dev'));
+app.use(cookieParser(process.env.SESSION_SECRET || 'dev-session-cookie-signing-secret-key'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // --------------- Routes ---------------
 app.use('/api/health', healthRoutes);
+app.use('/api/auth', authRoutes);
 
 // Root route
 app.get('/', (req, res) => {

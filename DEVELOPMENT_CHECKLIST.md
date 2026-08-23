@@ -14,12 +14,12 @@
 ---
 
 ## Phase 2 — Authentication
-- [ ] Google authentication
-- [ ] Phone OTP
-- [ ] Account linking
-- [ ] Logout
-- [ ] Authentication protection
-- [ ] Authentication tests
+- [x] Google authentication
+- [x] Phone OTP
+- [x] Account linking
+- [x] Logout
+- [x] Authentication protection
+- [x] Authentication tests
 
 ---
 

@@ -8,29 +8,23 @@ Newest changes appear at the top.
 ## 2026-08-23
 
 ### Added
-- **Project Setup (Phase 1)**:
-  - Initialized Git repository.
-  - Setup React + Vite frontend with Tailwind CSS v3, React Router, Axios, and ESLint/Prettier configuration.
-  - Setup Node.js + Express backend with CORS, Helmet, Morgan, and custom global error handling middleware.
-  - Configured PostgreSQL connection using Prisma ORM with placeholder schema.
-  - Generated Prisma client singleton (`backend/src/config/db.js`).
-  - Added backend health endpoint (`/api/health`) and database health checker (`/api/health/db`) with graceful placeholder error handling.
-  - Setup environment configurations (`.env.example` and local `.env` files).
-  - Created architecture, database, API, security, and development-plan docs under `/docs`.
-  - Added comprehensive `README.md`.
-- Created project progress, checklist, changelog, and handoff documentation files.
-
-### Changed
-- Resolved PostCSS build warning in `frontend/src/index.css` by restructuring CSS directives and `@import`.
+- **Secure Authentication (Phase 2)**:
+  - Created authentication database schema including `User`, `AuthAccount`, `Session`, and `OTPVerification` models.
+  - Implemented signed cookie-based session management middleware with HTTP-only security properties.
+  - Added Google OAuth ID token verification endpoint with a local developer bypass/mocking mode.
+  - Implemented Phone number OTP authentication featuring cryptographically secure OTP generation, bcrypt hashing, a 60s request cooldown block, and a 5-attempt verification lockout mechanism.
+  - Created secure endpoints to link Google and Phone profiles without silent merges or overwrites.
+  - Added frontend `AuthContext` to manage auth lifecycle states, login views, and profile layouts.
+  - Added custom integration test runner (`backend/tests/run-tests.js`) testing all 13 core authentication and security logic flows.
+  - Configured Axios singleton with `withCredentials: true` globally.
 
 ### Fixed
-- None (Phase 1 initialized from scratch).
+- Fixed a `ReferenceError` in `backend/tests/run-tests.js` by correctly importing `hashValue` from `backend/src/utils/crypto.js` to ensure the test suite executes successfully.
 
 ### Tests
-- Frontend built successfully (production bundle compilation has 0 errors/warnings).
-- Frontend and backend linting checks passed without any errors/warnings.
-- Backend server successfully started and responded to `GET /api/health` with `status: "ok"`.
-- Backend database health endpoint `GET /api/health/db` verified to handle missing/placeholder database connection string gracefully.
+- Integration tests: 13/13 tests passed successfully.
+- Frontend: production build compiled with 0 errors/warnings.
+- Linting: 0 lint errors/warnings across frontend and backend.
 
 ### Next
-- Start Phase 2: Google Authentication & Phone OTP.
+- Start Phase 3: User Profile API and UI.

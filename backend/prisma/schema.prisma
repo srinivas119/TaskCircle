@@ -1,6 +1,5 @@
 // TaskCircle — Prisma Schema
-// Phase 1: Minimal placeholder schema for foundation setup
-// The production schema will be designed during the appropriate development phase
+// Phase 2: Authentication Schema
 
 generator client {
   provider = "prisma-client-js"
@@ -11,12 +10,57 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Placeholder model to verify Prisma configuration
-// This will be replaced with the real schema in Phase 2+
 model User {
+  id           String        @id @default(cuid())
+  email        String?       @unique
+  phone        String?       @unique
+  name         String?
+  username     String?       @unique
+  profileImage String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  accounts     AuthAccount[]
+  sessions     Session[]
+}
+
+model AuthAccount {
+  id         String   @id @default(cuid())
+  userId     String
+  provider   String   // "GOOGLE" or "PHONE"
+  providerId String   // Google sub ID or phone number
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerId])
+  @@unique([userId, provider])
+  @@index([userId])
+}
+
+model Session {
   id        String   @id @default(cuid())
-  email     String?  @unique
-  name      String?
+  sid       String   @unique
+  userId    String
+  expiresAt DateTime
+  userAgent String?
+  ipAddress String?
+  isValid   Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model OTPVerification {
+  id        String   @id @default(cuid())
+  phone     String
+  otpHash   String
+  expiresAt DateTime
+  attempts  Int      @default(0)
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([phone, createdAt])
 }

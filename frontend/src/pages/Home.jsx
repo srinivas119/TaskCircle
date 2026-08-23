@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import api from '../api/axios';
+import { useAuth } from '../context/AuthContext';
 
 function Home() {
+  const { user } = useAuth();
   const [backendStatus, setBackendStatus] = useState('checking');
   const [backendData, setBackendData] = useState(null);
   const [dbStatus, setDbStatus] = useState('checking');
@@ -56,11 +58,14 @@ function Home() {
       <div className="text-center mb-16">
         <div className="inline-flex items-center gap-2 bg-primary-500/10 border border-primary-500/20 rounded-full px-4 py-1.5 mb-6">
           <div className="w-2 h-2 bg-primary-400 rounded-full animate-pulse"></div>
-          <span className="text-sm font-medium text-primary-400">Phase 1 — Foundation Active</span>
+          <span className="text-sm font-medium text-primary-400">Phase 2 — Authentication Active</span>
         </div>
         <h1 className="text-5xl sm:text-6xl font-extrabold tracking-tight mb-4">
           Task<span className="text-transparent bg-clip-text bg-gradient-to-r from-primary-400 to-primary-600">Circle</span>
         </h1>
+        <p className="text-xl text-white font-semibold mb-2">
+          Welcome back, {user?.name || 'User'}!
+        </p>
         <p className="text-lg text-dark-400 max-w-2xl mx-auto">
           Collaborative task management for teams. Share tasks, track progress, and stay organized — together.
         </p>

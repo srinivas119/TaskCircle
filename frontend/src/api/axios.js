@@ -6,6 +6,7 @@ const api = axios.create({
     'Content-Type': 'application/json',
   },
   timeout: 10000,
+  withCredentials: true,
 });
 
 // Request interceptor — will be used for auth tokens in Phase 2+
