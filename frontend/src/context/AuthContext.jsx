@@ -1,4 +1,11 @@
-import { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+} from 'react';
+
 import api from '../api/axios';
 
 const AuthContext = createContext(null);
@@ -8,133 +15,548 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Fetch current user (session restoration)
+  // =========================================================
+  // FETCH CURRENT USER
+  // =========================================================
+
   const fetchCurrentUser = useCallback(async () => {
     try {
       setLoading(true);
+
       const response = await api.get('/auth/me');
+
       if (response.data?.success) {
         setUser(response.data.user);
       } else {
         setUser(null);
       }
     } catch (err) {
-      // 401 is expected if not logged in
       setUser(null);
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Fetch on mount
   useEffect(() => {
     fetchCurrentUser();
   }, [fetchCurrentUser]);
 
-  // Login/Sign up with Google
-  const loginWithGoogle = async (credential) => {
+  // =========================================================
+  // LOGIN WITH EMAIL / PASSWORD
+  // =========================================================
+
+  const loginWithEmail = async (email, password) => {
     try {
       setError(null);
       setLoading(true);
-      const response = await api.post('/auth/google', { credential });
+
+      const response = await api.post('/auth/login', {
+        email,
+        password,
+      });
+
       if (response.data?.success) {
         setUser(response.data.user);
-        return { success: true };
-      }
-      throw new Error(response.data?.error || 'Google login failed');
-    } catch (err) {
-      const errMsg = err.response?.data?.error || err.message;
-      setError(errMsg);
-      setLoading(false);
-      return { success: false, error: errMsg, code: err.response?.data?.code };
-    }
-  };
+        setLoading(false);
 
-  // Request Phone OTP
-  const requestOtp = async (phone) => {
-    try {
-      setError(null);
-      const response = await api.post('/auth/phone/request-otp', { phone });
-      if (response.data?.success) {
-        return { 
-          success: true, 
-          // Exposed in test mode only
-          _devOtp: response.data._devOtp 
+        return {
+          success: true,
         };
       }
-      throw new Error(response.data?.error || 'Requesting OTP failed');
+
+      throw new Error(
+        response.data?.error || 'Login failed'
+      );
     } catch (err) {
-      const errMsg = err.response?.data?.error || err.message;
+      const errMsg =
+        err.response?.data?.error ||
+        err.message ||
+        'Login failed';
+
       setError(errMsg);
-      return { success: false, error: errMsg };
+      setLoading(false);
+
+      return {
+        success: false,
+        error: errMsg,
+        code: err.response?.data?.code,
+        requiresVerification:
+          err.response?.data?.requiresVerification || false,
+      };
     }
   };
 
-  // Verify Phone OTP (and Login/Sign up)
-  const verifyOtp = async (phone, otp) => {
+  // =========================================================
+  // SIGN UP WITH EMAIL / PASSWORD
+  // =========================================================
+
+  const signUpWithEmail = async (
+    name,
+    email,
+    username,
+    password
+  ) => {
     try {
       setError(null);
       setLoading(true);
-      const response = await api.post('/auth/phone/verify-otp', { phone, otp });
+
+      const response = await api.post('/auth/register', {
+        name,
+        email,
+        username,
+        password,
+      });
+
       if (response.data?.success) {
-        setUser(response.data.user);
-        return { success: true };
+        setLoading(false);
+
+        return {
+          success: true,
+          requiresVerification:
+            response.data?.requiresVerification ?? true,
+          email:
+            response.data?.email || email,
+          message:
+            response.data?.message ||
+            'Verification OTP sent to your email.',
+        };
       }
-      throw new Error(response.data?.error || 'OTP verification failed');
+
+      throw new Error(
+        response.data?.error ||
+          'Registration failed'
+      );
     } catch (err) {
-      const errMsg = err.response?.data?.error || err.message;
+      const errMsg =
+        err.response?.data?.error ||
+        err.message ||
+        'Registration failed';
+
       setError(errMsg);
       setLoading(false);
-      return { success: false, error: errMsg };
+
+      return {
+        success: false,
+        error: errMsg,
+        code: err.response?.data?.code,
+        requiresVerification:
+          err.response?.data?.requiresVerification ||
+          false,
+      };
     }
   };
 
-  // Link Google Account to existing user
-  const linkGoogle = async (credential) => {
+  // =========================================================
+  // VERIFY EMAIL OTP
+  // =========================================================
+
+  const verifyEmailOtp = async (
+    email,
+    otp
+  ) => {
     try {
       setError(null);
-      const response = await api.post('/auth/link-google', { credential });
+      setLoading(true);
+
+      const response = await api.post(
+        '/auth/verify-email-otp',
+        {
+          email,
+          otp,
+        }
+      );
+
       if (response.data?.success) {
-        setUser(response.data.user);
-        return { success: true };
+        setLoading(false);
+
+        return {
+          success: true,
+          message:
+            response.data?.message ||
+            'Email verified successfully.',
+        };
       }
-      throw new Error(response.data?.error || 'Linking Google account failed');
+
+      throw new Error(
+        response.data?.error ||
+          'OTP verification failed'
+      );
     } catch (err) {
-      const errMsg = err.response?.data?.error || err.message;
+      const errMsg =
+        err.response?.data?.error ||
+        err.message ||
+        'OTP verification failed';
+
       setError(errMsg);
-      return { success: false, error: errMsg, code: err.response?.data?.code };
+      setLoading(false);
+
+      return {
+        success: false,
+        error: errMsg,
+      };
     }
   };
 
-  // Link Phone Account to existing user
-  const linkPhone = async (phone, otp) => {
+  // =========================================================
+  // RESEND EMAIL OTP
+  // =========================================================
+
+  const resendEmailOtp = async (email) => {
     try {
       setError(null);
-      const response = await api.post('/auth/link-phone', { phone, otp });
+
+      const response = await api.post(
+        '/auth/resend-email-otp',
+        {
+          email,
+        }
+      );
+
       if (response.data?.success) {
-        setUser(response.data.user);
-        return { success: true };
+        return {
+          success: true,
+          message:
+            response.data?.message ||
+            'A new OTP has been sent.',
+        };
       }
-      throw new Error(response.data?.error || 'Linking phone account failed');
+
+      throw new Error(
+        response.data?.error ||
+          'Failed to resend OTP'
+      );
     } catch (err) {
-      const errMsg = err.response?.data?.error || err.message;
+      const errMsg =
+        err.response?.data?.error ||
+        err.message ||
+        'Failed to resend OTP';
+
       setError(errMsg);
-      return { success: false, error: errMsg, code: err.response?.data?.code };
+
+      return {
+        success: false,
+        error: errMsg,
+      };
     }
   };
 
-  // Logout
+  // =========================================================
+  // LOGIN / SIGN UP WITH GOOGLE
+  // =========================================================
+
+  const loginWithGoogle = async (
+    credential
+  ) => {
+    try {
+      setError(null);
+      setLoading(true);
+
+      const response = await api.post(
+        '/auth/google',
+        {
+          credential,
+        }
+      );
+
+      if (response.data?.success) {
+        setUser(response.data.user);
+        setLoading(false);
+
+        return {
+          success: true,
+        };
+      }
+
+      throw new Error(
+        response.data?.error ||
+          'Google authentication failed'
+      );
+    } catch (err) {
+      const errMsg =
+        err.response?.data?.error ||
+        err.message ||
+        'Google authentication failed';
+
+      setError(errMsg);
+      setLoading(false);
+
+      return {
+        success: false,
+        error: errMsg,
+        code:
+          err.response?.data?.code,
+      };
+    }
+  };
+
+  // =========================================================
+  // FORGOT PASSWORD
+  // =========================================================
+
+  const forgotPassword = async (
+    email
+  ) => {
+    try {
+      setError(null);
+      setLoading(true);
+
+      const response = await api.post(
+        '/auth/forgot-password',
+        {
+          email,
+        }
+      );
+
+      if (response.data?.success) {
+        setLoading(false);
+
+        return {
+          success: true,
+          message:
+            response.data?.message,
+        };
+      }
+
+      throw new Error(
+        response.data?.error ||
+          'Password reset request failed'
+      );
+    } catch (err) {
+      const errMsg =
+        err.response?.data?.error ||
+        err.message ||
+        'Password reset request failed';
+
+      setError(errMsg);
+      setLoading(false);
+
+      return {
+        success: false,
+        error: errMsg,
+      };
+    }
+  };
+
+  // =========================================================
+  // RESET PASSWORD
+  // =========================================================
+
+  const resetPassword = async (
+    token,
+    password
+  ) => {
+    try {
+      setError(null);
+      setLoading(true);
+
+      const response = await api.post(
+        '/auth/reset-password',
+        {
+          token,
+          password,
+        }
+      );
+
+      if (response.data?.success) {
+        setLoading(false);
+
+        return {
+          success: true,
+          message:
+            response.data?.message,
+        };
+      }
+
+      throw new Error(
+        response.data?.error ||
+          'Password reset failed'
+      );
+    } catch (err) {
+      const errMsg =
+        err.response?.data?.error ||
+        err.message ||
+        'Password reset failed';
+
+      setError(errMsg);
+      setLoading(false);
+
+      return {
+        success: false,
+        error: errMsg,
+      };
+    }
+  };
+
+  // =========================================================
+  // LINK GOOGLE ACCOUNT
+  // =========================================================
+
+  const linkGoogle = async (
+    credential
+  ) => {
+    try {
+      setError(null);
+
+      const response = await api.post(
+        '/auth/link-google',
+        {
+          credential,
+        }
+      );
+
+      if (response.data?.success) {
+        setUser(response.data.user);
+
+        return {
+          success: true,
+        };
+      }
+
+      throw new Error(
+        response.data?.error ||
+          'Linking Google account failed'
+      );
+    } catch (err) {
+      const errMsg =
+        err.response?.data?.error ||
+        err.message ||
+        'Linking Google account failed';
+
+      setError(errMsg);
+
+      return {
+        success: false,
+        error: errMsg,
+        code:
+          err.response?.data?.code,
+      };
+    }
+  };
+
+  // =========================================================
+  // UPDATE PROFILE
+  // =========================================================
+
+  const updateProfile = async (
+    data
+  ) => {
+    try {
+      setError(null);
+
+      const response = await api.put(
+        '/profile',
+        data
+      );
+
+      if (response.data?.success) {
+        setUser(response.data.user);
+
+        return {
+          success: true,
+        };
+      }
+
+      throw new Error(
+        response.data?.error ||
+          'Profile update failed'
+      );
+    } catch (err) {
+      const errMsg =
+        err.response?.data?.error ||
+        err.message ||
+        'Profile update failed';
+
+      setError(errMsg);
+
+      return {
+        success: false,
+        error: errMsg,
+      };
+    }
+  };
+
+  // =========================================================
+  // UPLOAD AVATAR
+  // =========================================================
+
+  const uploadAvatar = async (
+    file
+  ) => {
+    try {
+      setError(null);
+
+      const formData = new FormData();
+
+      formData.append(
+        'avatar',
+        file
+      );
+
+      const response = await api.post(
+        '/profile/avatar',
+        formData,
+        {
+          headers: {
+            'Content-Type':
+              'multipart/form-data',
+          },
+        }
+      );
+
+      if (response.data?.success) {
+        setUser(response.data.user);
+
+        return {
+          success: true,
+          profileImage:
+            response.data.profileImage,
+        };
+      }
+
+      throw new Error(
+        response.data?.error ||
+          'Avatar upload failed'
+      );
+    } catch (err) {
+      const errMsg =
+        err.response?.data?.error ||
+        err.message ||
+        'Avatar upload failed';
+
+      setError(errMsg);
+
+      return {
+        success: false,
+        error: errMsg,
+      };
+    }
+  };
+
+  // =========================================================
+  // LOGOUT
+  // =========================================================
+
   const logout = async () => {
     try {
       setLoading(true);
-      await api.post('/auth/logout');
+
+      await api.post(
+        '/auth/logout'
+      );
     } catch (err) {
-      console.error('Logout error API request failed:', err.message);
+      console.error(
+        'Logout error:',
+        err.message
+      );
     } finally {
       setUser(null);
       setLoading(false);
     }
   };
+
+  // =========================================================
+  // CONTEXT VALUE
+  // =========================================================
 
   return (
     <AuthContext.Provider
@@ -143,13 +565,31 @@ export const AuthProvider = ({ children }) => {
         loading,
         error,
         setError,
+
+        loginWithEmail,
+
+        signUpWithEmail,
+
+        verifyEmailOtp,
+
+        resendEmailOtp,
+
         loginWithGoogle,
-        requestOtp,
-        verifyOtp,
+
+        forgotPassword,
+
+        resetPassword,
+
         linkGoogle,
-        linkPhone,
+
+        updateProfile,
+
+        uploadAvatar,
+
         logout,
-        refreshSession: fetchCurrentUser,
+
+        refreshSession:
+          fetchCurrentUser,
       }}
     >
       {children}
@@ -158,9 +598,14 @@ export const AuthProvider = ({ children }) => {
 };
 
 export const useAuth = () => {
-  const context = useContext(AuthContext);
+  const context =
+    useContext(AuthContext);
+
   if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error(
+      'useAuth must be used within an AuthProvider'
+    );
   }
+
   return context;
 };

@@ -31,12 +31,37 @@ prisma.user.findUnique = async ({ where }) => {
   return null;
 };
 
+prisma.user.findFirst = async ({ where }) => {
+  if (where.OR) {
+    const emailCond = where.OR.find((c) => c.email);
+    const usernameCond = where.OR.find((c) => c.username);
+    return db.users.find((u) => 
+      (emailCond && u.email === emailCond.email) || 
+      (usernameCond && u.username === usernameCond.username)
+    ) || null;
+  }
+  if (where.resetToken) {
+    const user = db.users.find((u) => u.resetToken === where.resetToken);
+    if (user && where.resetTokenExpires?.gt) {
+      if (user.resetTokenExpires > where.resetTokenExpires.gt) {
+        return user;
+      }
+    }
+    return user || null;
+  }
+  return null;
+};
+
 prisma.user.create = async ({ data }) => {
   const newUser = {
     id: `usr_${Math.random().toString(36).substr(2, 9)}`,
     email: data.email || null,
     phone: data.phone || null,
     name: data.name || null,
+    username: data.username || null,
+    passwordHash: data.passwordHash || null,
+    resetToken: null,
+    resetTokenExpires: null,
     profileImage: data.profileImage || null,
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -62,10 +87,13 @@ prisma.user.create = async ({ data }) => {
 prisma.user.update = async ({ where, data }) => {
   const user = db.users.find((u) => u.id === where.id);
   if (!user) throw new Error('User not found');
-  if (data.phone) user.phone = data.phone;
-  if (data.email) user.email = data.email;
-  if (data.name) user.name = data.name;
-  if (data.profileImage) user.profileImage = data.profileImage;
+  if (data.phone !== undefined) user.phone = data.phone;
+  if (data.email !== undefined) user.email = data.email;
+  if (data.name !== undefined) user.name = data.name;
+  if (data.profileImage !== undefined) user.profileImage = data.profileImage;
+  if (data.passwordHash !== undefined) user.passwordHash = data.passwordHash;
+  if (data.resetToken !== undefined) user.resetToken = data.resetToken;
+  if (data.resetTokenExpires !== undefined) user.resetTokenExpires = data.resetTokenExpires;
   user.updatedAt = new Date();
   return user;
 };
@@ -129,6 +157,14 @@ prisma.session.update = async ({ where, data }) => {
   if (!session) throw new Error('Session not found');
   if (data.isValid !== undefined) session.isValid = data.isValid;
   return session;
+};
+
+prisma.session.updateMany = async ({ where, data }) => {
+  const targets = db.sessions.filter((s) => s.userId === where.userId);
+  targets.forEach((s) => {
+    if (data.isValid !== undefined) s.isValid = data.isValid;
+  });
+  return { count: targets.length };
 };
 
 prisma.oTPVerification.create = async ({ data }) => {
@@ -417,6 +453,82 @@ const runTests = async () => {
       .set('Cookie', [cookieHeader]);
     assert.strictEqual(checkAfterLogout.status, 401);
     console.log('✅ Passed Test 13\n');
+
+    // ----------------------------------------------------
+    // Test 14: Email/Password Register
+    // ----------------------------------------------------
+    console.log('Test 14: Register user via Email/Password...');
+    const registerRes = await request(app)
+      .post('/api/auth/register')
+      .send({
+        name: 'Jane Doe',
+        email: 'jane@example.com',
+        username: 'janedoe',
+        password: 'password123',
+      });
+
+    assert.strictEqual(registerRes.status, 201);
+    assert.strictEqual(registerRes.body.success, true);
+    assert.strictEqual(registerRes.body.user.email, 'jane@example.com');
+    assert.strictEqual(registerRes.body.user.username, 'janedoe');
+    console.log('✅ Passed Test 14\n');
+
+    // ----------------------------------------------------
+    // Test 15: Email/Password Login
+    // ----------------------------------------------------
+    console.log('Test 15: Login user via Email/Password...');
+    const loginRes = await request(app)
+      .post('/api/auth/login')
+      .send({
+        email: 'jane@example.com',
+        password: 'password123',
+      });
+
+    assert.strictEqual(loginRes.status, 200);
+    assert.strictEqual(loginRes.body.success, true);
+    assert.strictEqual(loginRes.body.user.email, 'jane@example.com');
+    const janeCookie = extractCookie(loginRes, 'sid');
+    assert.ok(janeCookie);
+    console.log('✅ Passed Test 15\n');
+
+    // ----------------------------------------------------
+    // Test 16: Request Forgot Password Token
+    // ----------------------------------------------------
+    console.log('Test 16: Request forgot password token...');
+    const forgotRes = await request(app)
+      .post('/api/auth/forgot-password')
+      .send({ email: 'jane@example.com' });
+
+    assert.strictEqual(forgotRes.status, 200);
+    assert.strictEqual(forgotRes.body.success, true);
+    const resetToken = forgotRes.body._devToken; // Exposed in test mode only
+    assert.ok(resetToken);
+    console.log('✅ Passed Test 16\n');
+
+    // ----------------------------------------------------
+    // Test 17: Reset Password with Token
+    // ----------------------------------------------------
+    console.log('Test 17: Reset password with token...');
+    const resetRes = await request(app)
+      .post('/api/auth/reset-password')
+      .send({
+        token: resetToken,
+        password: 'newpassword456',
+      });
+
+    assert.strictEqual(resetRes.status, 200);
+    assert.strictEqual(resetRes.body.success, true);
+
+    // Verify we can log in with new password
+    const newLoginRes = await request(app)
+      .post('/api/auth/login')
+      .send({
+        email: 'jane@example.com',
+        password: 'newpassword456',
+      });
+    assert.strictEqual(newLoginRes.status, 200);
+    assert.strictEqual(newLoginRes.body.success, true);
+    console.log('✅ Passed Test 17\n');
 
     console.log('🎉 ALL TESTS PASSED SUCCESSFULLY! 🎉');
     process.exit(0);

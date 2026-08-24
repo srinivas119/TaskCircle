@@ -9,38 +9,40 @@ import {
   compareHash,
   generateSessionToken,
 } from '../utils/crypto.js';
+import transporter from '../utils/mail.js';
 
 const router = Router();
 
-// Rate limiter for OTP requests (max 5 requests per 15 minutes per IP)
 const otpRequestLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 5,
   message: {
     success: false,
-    error: 'Too many OTP requests from this IP. Please try again after 15 minutes.',
+    error:
+      'Too many OTP requests. Please try again after 15 minutes.',
   },
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-// Helper: Create a session and set signed cookie
 const createAuthSession = async (req, res, userId) => {
   const sid = generateSessionToken();
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-  // Save session to database
+  const expiresAt = new Date(
+    Date.now() + 7 * 24 * 60 * 60 * 1000
+  );
+
   await prisma.session.create({
     data: {
       sid,
       userId,
       expiresAt,
       userAgent: req.headers['user-agent'],
-      ipAddress: req.ip || req.connection.remoteAddress,
+      ipAddress:
+        req.ip || req.connection?.remoteAddress,
     },
   });
 
-  // Set secure signed cookie
   res.cookie('sid', sid, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
@@ -50,10 +52,76 @@ const createAuthSession = async (req, res, userId) => {
   });
 };
 
-/**
- * POST /api/auth/google
- * Google Sign-in and Sign-up (ID Token flow)
- */
+const sendEmailOTP = async (email, otp) => {
+  await transporter.sendMail({
+    from: `"TaskCircle" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject: 'TaskCircle Email Verification OTP',
+    html: `
+      <!DOCTYPE html>
+      <html>
+        <body style="margin:0;padding:0;background:#0f172a;font-family:Arial,sans-serif;">
+          <div style="max-width:500px;margin:40px auto;background:#111827;border-radius:16px;padding:35px;color:white;">
+            
+            <div style="text-align:center;">
+              <h1 style="margin:0;font-size:28px;">
+                Task<span style="color:#60a5fa;">Circle</span>
+              </h1>
+
+              <p style="color:#9ca3af;margin-top:8px;">
+                Verify your email address
+              </p>
+            </div>
+
+            <div style="margin-top:30px;text-align:center;">
+              <p style="color:#d1d5db;">
+                Your verification code is:
+              </p>
+
+              <div style="
+                display:inline-block;
+                background:#1e293b;
+                border:1px solid #334155;
+                border-radius:12px;
+                padding:18px 30px;
+                margin:10px 0;
+              ">
+                <span style="
+                  font-size:32px;
+                  font-weight:bold;
+                  letter-spacing:8px;
+                  color:#60a5fa;
+                ">
+                  ${otp}
+                </span>
+              </div>
+
+              <p style="color:#9ca3af;font-size:14px;">
+                This OTP is valid for 10 minutes.
+              </p>
+
+              <p style="color:#9ca3af;font-size:13px;margin-top:25px;">
+                If you did not create a TaskCircle account,
+                you can safely ignore this email.
+              </p>
+            </div>
+
+          </div>
+        </body>
+      </html>
+    `,
+  });
+};
+
+/*
+|--------------------------------------------------------------------------
+| GOOGLE AUTH
+|--------------------------------------------------------------------------
+| Google is available from the Create Account page.
+| Google users are automatically email verified.
+|--------------------------------------------------------------------------
+*/
+
 router.post('/google', async (req, res, next) => {
   try {
     const { credential } = req.body;
@@ -61,76 +129,111 @@ router.post('/google', async (req, res, next) => {
     if (!credential) {
       return res.status(400).json({
         success: false,
-        error: 'Google credential (ID Token) is required.',
+        error: 'Google credential is required.',
       });
     }
 
-    // Verify Google ID token
-    const googleUser = await verifyGoogleToken(credential);
+    const googleUser =
+      await verifyGoogleToken(credential);
 
-    // Check if AuthAccount for GOOGLE and sub exists
-    let account = await prisma.authAccount.findUnique({
-      where: {
-        provider_providerId: {
-          provider: 'GOOGLE',
-          providerId: googleUser.sub,
+    if (!googleUser.email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Google account does not contain an email address.',
+      });
+    }
+
+    const email =
+      googleUser.email.trim().toLowerCase();
+
+    let account =
+      await prisma.authAccount.findUnique({
+        where: {
+          provider_providerId: {
+            provider: 'GOOGLE',
+            providerId: googleUser.sub,
+          },
         },
-      },
-      include: { user: true },
-    });
+        include: {
+          user: true,
+        },
+      });
 
     let userId;
 
     if (account) {
-      // Existing Google account -> log in
       userId = account.userId;
+
+      if (!account.user.emailVerified) {
+        await prisma.user.update({
+          where: {
+            id: account.userId,
+          },
+          data: {
+            emailVerified: true,
+          },
+        });
+      }
     } else {
-      // New Google account -> check if email already registered to another user
-      if (googleUser.email) {
-        const existingUser = await prisma.user.findUnique({
-          where: { email: googleUser.email },
+      const existingUser =
+        await prisma.user.findUnique({
+          where: {
+            email,
+          },
         });
 
-        if (existingUser) {
-          return res.status(409).json({
-            success: false,
-            code: 'EMAIL_ALREADY_IN_USE',
-            error: 'An account with this email already exists. Please log in with your original method, then link Google from your profile.',
-          });
-        }
+      if (existingUser) {
+        return res.status(409).json({
+          success: false,
+          code: 'EMAIL_ALREADY_IN_USE',
+          error:
+            'An account with this email already exists. Please use email login.',
+        });
       }
 
-      // Create new User and Google AuthAccount
-      const newUser = await prisma.user.create({
-        data: {
-          email: googleUser.email,
-          name: googleUser.name,
-          profileImage: googleUser.picture,
+      const newUser =
+        await prisma.user.create({
+          data: {
+            email,
+            name: googleUser.name || null,
+            profileImage:
+              googleUser.picture || null,
+
+            emailVerified: true,
+
+            accounts: {
+              create: {
+                provider: 'GOOGLE',
+                providerId: googleUser.sub,
+              },
+            },
+          },
+        });
+
+      userId = newUser.id;
+    }
+
+    await createAuthSession(
+      req,
+      res,
+      userId
+    );
+
+    const user =
+      await prisma.user.findUnique({
+        where: {
+          id: userId,
+        },
+        include: {
           accounts: {
-            create: {
-              provider: 'GOOGLE',
-              providerId: googleUser.sub,
+            select: {
+              provider: true,
             },
           },
         },
       });
-      userId = newUser.id;
-    }
 
-    // Start session
-    await createAuthSession(req, res, userId);
-
-    // Fetch user to return
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        accounts: {
-          select: { provider: true },
-        },
-      },
-    });
-
-    res.json({
+    return res.json({
       success: true,
       user,
     });
@@ -139,470 +242,1132 @@ router.post('/google', async (req, res, next) => {
   }
 });
 
-/**
- * POST /api/auth/phone/request-otp
- * Generates and stores OTP. Emulates sending SMS.
- */
-router.post('/phone/request-otp', otpRequestLimiter, async (req, res, next) => {
-  try {
-    const { phone } = req.body;
+/*
+|--------------------------------------------------------------------------
+| REGISTER
+|--------------------------------------------------------------------------
+| Creates the account but does NOT allow login.
+| Sends a 6-digit email OTP.
+|--------------------------------------------------------------------------
+*/
 
-    if (!phone || typeof phone !== 'string') {
+router.post('/register', otpRequestLimiter, async (req, res, next) => {
+  try {
+    const {
+      name,
+      email,
+      username,
+      password,
+    } = req.body;
+
+    if (!email || typeof email !== 'string') {
       return res.status(400).json({
         success: false,
-        error: 'Valid phone number is required.',
+        error: 'Valid email is required.',
       });
     }
 
-    // Cooldown check: max 1 OTP request per phone number every 60 seconds
-    const latestOtp = await prisma.oTPVerification.findFirst({
-      where: { phone },
-      orderBy: { createdAt: 'desc' },
-    });
+    const cleanEmail =
+      email.trim().toLowerCase();
 
-    if (latestOtp) {
-      const msSinceLastOtp = Date.now() - new Date(latestOtp.createdAt).getTime();
-      if (msSinceLastOtp < 60 * 1000) {
-        return res.status(429).json({
+    const emailRegex =
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!emailRegex.test(cleanEmail)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid email format.',
+      });
+    }
+
+    if (
+      !username ||
+      typeof username !== 'string'
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: 'Username is required.',
+      });
+    }
+
+    const cleanUsername =
+      username.trim().toLowerCase();
+
+    const usernameRegex =
+      /^[a-zA-Z0-9_]{3,20}$/;
+
+    if (!usernameRegex.test(cleanUsername)) {
+      return res.status(400).json({
+        success: false,
+        error:
+          'Username must be between 3 and 20 characters and contain only letters, numbers, or underscores.',
+      });
+    }
+
+    if (
+      !password ||
+      typeof password !== 'string' ||
+      password.length < 6
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          'Password must be at least 6 characters long.',
+      });
+    }
+
+    const existingUser =
+      await prisma.user.findFirst({
+        where: {
+          OR: [
+            {
+              email: cleanEmail,
+            },
+            {
+              username: cleanUsername,
+            },
+          ],
+        },
+      });
+
+    if (existingUser) {
+      if (
+        existingUser.email === cleanEmail
+      ) {
+        return res.status(409).json({
           success: false,
-          error: 'Please wait 60 seconds before requesting another OTP.',
+          error:
+            existingUser.emailVerified
+              ? 'An account with this email already exists.'
+              : 'An account with this email already exists. Please verify your email or request a new OTP.',
+          requiresVerification:
+            !existingUser.emailVerified,
+        });
+      }
+
+      if (
+        existingUser.username ===
+        cleanUsername
+      ) {
+        return res.status(409).json({
+          success: false,
+          error:
+            'Username is already taken.',
         });
       }
     }
 
-    // Invalidate/expire any previous active OTPs for this phone number
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    await prisma.oTPVerification.updateMany({
-      where: {
-        phone,
-        createdAt: { gte: fiveMinutesAgo },
-        verified: false,
-        expiresAt: { gte: new Date() },
-      },
-      data: {
-        expiresAt: new Date(Date.now() - 1000), // set to past
-      },
-    });
+    const passwordHash =
+      await hashValue(password);
 
-    // Generate secure 6-digit OTP
+    const user =
+      await prisma.user.create({
+        data: {
+          email: cleanEmail,
+          username: cleanUsername,
+          name: name
+            ? name.trim()
+            : null,
+          passwordHash,
+          emailVerified: false,
+        },
+      });
+
     const otp = generateOTP();
-    const otpHash = await hashValue(otp);
-    const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes expiration
 
-    // Store in DB
+    const otpHash =
+      await hashValue(otp);
+
+    const expiresAt = new Date(
+      Date.now() + 10 * 60 * 1000
+    );
+
     await prisma.oTPVerification.create({
       data: {
-        phone,
+        email: cleanEmail,
         otpHash,
         expiresAt,
       },
     });
 
-    // Development Console Logging (Mock SMS sending)
-    if (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test') {
-      console.log(`📱 [SMS Mock] Sent OTP to ${phone}: ${otp}`);
+    await sendEmailOTP(
+      cleanEmail,
+      otp
+    );
+
+    if (
+      process.env.NODE_ENV ===
+        'development' ||
+      process.env.NODE_ENV === 'test'
+    ) {
+      console.log(
+        `📧 Email OTP for ${cleanEmail}: ${otp}`
+      );
     }
 
-    // In production, we'd fire off to AWS SNS, Twilio, or another provider here.
-    // Ensure we do NOT log the raw OTP code in production.
-
-    res.json({
+    return res.status(201).json({
       success: true,
-      message: 'OTP sent successfully.',
-      // Return OTP in dev/test ONLY for programmatic verification tests (never in production)
-      ...(process.env.NODE_ENV === 'test' && { _devOtp: otp }),
+      requiresVerification: true,
+      message:
+        'Account created. A verification OTP has been sent to your email.',
+      email: cleanEmail,
     });
   } catch (error) {
     next(error);
   }
 });
 
-/**
- * POST /api/auth/phone/verify-otp
- * Verifies OTP and logs in / signs up user.
- */
-router.post('/phone/verify-otp', async (req, res, next) => {
-  try {
-    const { phone, otp } = req.body;
+/*
+|--------------------------------------------------------------------------
+| VERIFY EMAIL OTP
+|--------------------------------------------------------------------------
+*/
 
-    if (!phone || !otp) {
-      return res.status(400).json({
-        success: false,
-        error: 'Phone number and OTP code are required.',
-      });
-    }
+router.post(
+  '/verify-email-otp',
+  otpRequestLimiter,
+  async (req, res, next) => {
+    try {
+      const { email, otp } =
+        req.body;
 
-    // Find the latest active verification attempt
-    const verification = await prisma.oTPVerification.findFirst({
-      where: {
-        phone,
-        verified: false,
-        expiresAt: { gte: new Date() },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+      if (
+        !email ||
+        !otp
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'Email and OTP are required.',
+        });
+      }
 
-    if (!verification) {
-      return res.status(400).json({
-        success: false,
-        error: 'OTP has expired or is invalid. Please request a new one.',
-      });
-    }
+      const cleanEmail =
+        email.trim().toLowerCase();
 
-    // Enforce attempt limits
-    if (verification.attempts >= 5) {
-      // Invalidate the OTP
-      await prisma.oTPVerification.update({
-        where: { id: verification.id },
-        data: { expiresAt: new Date(Date.now() - 1000) },
-      });
+      const cleanOtp =
+        String(otp).trim();
 
-      return res.status(429).json({
-        success: false,
-        error: 'Too many incorrect attempts. Please request a new OTP.',
-      });
-    }
+      if (!/^\d{6}$/.test(cleanOtp)) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'OTP must be exactly 6 digits.',
+        });
+      }
 
-    // Increment attempts count
-    await prisma.oTPVerification.update({
-      where: { id: verification.id },
-      data: { attempts: { increment: 1 } },
-    });
-
-    // Verify OTP code match
-    const isValid = await compareHash(otp, verification.otpHash);
-
-    if (!isValid) {
-      return res.status(400).json({
-        success: false,
-        error: 'Incorrect OTP code.',
-      });
-    }
-
-    // OTP is valid -> mark it verified
-    await prisma.oTPVerification.update({
-      where: { id: verification.id },
-      data: { verified: true },
-    });
-
-    // Check if user already exists with this phone AuthAccount
-    let account = await prisma.authAccount.findUnique({
-      where: {
-        provider_providerId: {
-          provider: 'PHONE',
-          providerId: phone,
-        },
-      },
-      include: { user: true },
-    });
-
-    let userId;
-
-    if (account) {
-      userId = account.userId;
-    } else {
-      // Check if user table has phone number linked without AuthAccount (edge case)
-      const existingUser = await prisma.user.findUnique({
-        where: { phone },
-      });
-
-      if (existingUser) {
-        // Link to existing user by creating AuthAccount
-        await prisma.authAccount.create({
-          data: {
-            userId: existingUser.id,
-            provider: 'PHONE',
-            providerId: phone,
+      const user =
+        await prisma.user.findUnique({
+          where: {
+            email: cleanEmail,
           },
         });
-        userId = existingUser.id;
-      } else {
-        // Create new User and Phone AuthAccount
-        const newUser = await prisma.user.create({
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error:
+            'Account not found.',
+        });
+      }
+
+      if (user.emailVerified) {
+        return res.json({
+          success: true,
+          message:
+            'Email is already verified.',
+        });
+      }
+
+      const verification =
+        await prisma.oTPVerification.findFirst({
+          where: {
+            email: cleanEmail,
+            verified: false,
+            expiresAt: {
+              gt: new Date(),
+            },
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+        });
+
+      if (!verification) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'OTP has expired or is invalid. Please request a new OTP.',
+        });
+      }
+
+      if (
+        verification.attempts >= 5
+      ) {
+        await prisma.oTPVerification.update({
+          where: {
+            id: verification.id,
+          },
           data: {
-            phone,
+            expiresAt:
+              new Date(
+                Date.now() - 1000
+              ),
+          },
+        });
+
+        return res.status(429).json({
+          success: false,
+          error:
+            'Too many incorrect attempts. Please request a new OTP.',
+        });
+      }
+
+      const isValid =
+        await compareHash(
+          cleanOtp,
+          verification.otpHash
+        );
+
+      if (!isValid) {
+        await prisma.oTPVerification.update({
+          where: {
+            id: verification.id,
+          },
+          data: {
+            attempts: {
+              increment: 1,
+            },
+          },
+        });
+
+        return res.status(400).json({
+          success: false,
+          error:
+            'Incorrect OTP.',
+        });
+      }
+
+      await prisma.$transaction([
+        prisma.oTPVerification.update({
+          where: {
+            id: verification.id,
+          },
+          data: {
+            verified: true,
+          },
+        }),
+
+        prisma.user.update({
+          where: {
+            id: user.id,
+          },
+          data: {
+            emailVerified: true,
+          },
+        }),
+      ]);
+
+      return res.json({
+        success: true,
+        message:
+          'Email verified successfully. You can now log in.',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/*
+|--------------------------------------------------------------------------
+| RESEND EMAIL OTP
+|--------------------------------------------------------------------------
+*/
+
+router.post(
+  '/resend-email-otp',
+  otpRequestLimiter,
+  async (req, res, next) => {
+    try {
+      const { email } =
+        req.body;
+
+      if (
+        !email ||
+        typeof email !== 'string'
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'Valid email is required.',
+        });
+      }
+
+      const cleanEmail =
+        email.trim().toLowerCase();
+
+      const user =
+        await prisma.user.findUnique({
+          where: {
+            email: cleanEmail,
+          },
+        });
+
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          error:
+            'Account not found.',
+        });
+      }
+
+      if (user.emailVerified) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'This email is already verified.',
+        });
+      }
+
+      const latestOtp =
+        await prisma.oTPVerification.findFirst({
+          where: {
+            email: cleanEmail,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+        });
+
+      if (latestOtp) {
+        const secondsSinceLastOtp =
+          (Date.now() -
+            new Date(
+              latestOtp.createdAt
+            ).getTime()) /
+          1000;
+
+        if (
+          secondsSinceLastOtp <
+          60
+        ) {
+          return res.status(429).json({
+            success: false,
+            error:
+              `Please wait ${Math.ceil(
+                60 -
+                  secondsSinceLastOtp
+              )} seconds before requesting another OTP.`,
+          });
+        }
+      }
+
+      await prisma.oTPVerification.updateMany({
+        where: {
+          email: cleanEmail,
+          verified: false,
+        },
+        data: {
+          expiresAt:
+            new Date(
+              Date.now() - 1000
+            ),
+        },
+      });
+
+      const otp = generateOTP();
+
+      const otpHash =
+        await hashValue(otp);
+
+      const expiresAt = new Date(
+        Date.now() + 10 * 60 * 1000
+      );
+
+      await prisma.oTPVerification.create({
+        data: {
+          email: cleanEmail,
+          otpHash,
+          expiresAt,
+        },
+      });
+
+      await sendEmailOTP(
+        cleanEmail,
+        otp
+      );
+
+      if (
+        process.env.NODE_ENV ===
+          'development' ||
+        process.env.NODE_ENV === 'test'
+      ) {
+        console.log(
+          `📧 New Email OTP for ${cleanEmail}: ${otp}`
+        );
+      }
+
+      return res.json({
+        success: true,
+        message:
+          'A new OTP has been sent to your email.',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/*
+|--------------------------------------------------------------------------
+| LOGIN
+|--------------------------------------------------------------------------
+*/
+
+router.post(
+  '/login',
+  async (req, res, next) => {
+    try {
+      const {
+        email,
+        password,
+      } = req.body;
+
+      if (
+        !email ||
+        !password
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'Email and password are required.',
+        });
+      }
+
+      const cleanEmail =
+        email.trim().toLowerCase();
+
+      const user =
+        await prisma.user.findUnique({
+          where: {
+            email: cleanEmail,
+          },
+          include: {
             accounts: {
-              create: {
-                provider: 'PHONE',
-                providerId: phone,
+              select: {
+                provider: true,
               },
             },
           },
         });
-        userId = newUser.id;
+
+      if (
+        !user ||
+        !user.passwordHash
+      ) {
+        return res.status(401).json({
+          success: false,
+          error:
+            'Invalid email or password.',
+        });
       }
+
+      if (!user.emailVerified) {
+        return res.status(403).json({
+          success: false,
+          code: 'EMAIL_NOT_VERIFIED',
+          requiresVerification: true,
+          error:
+            'Please verify your email before logging in.',
+        });
+      }
+
+      const isMatch =
+        await compareHash(
+          password,
+          user.passwordHash
+        );
+
+      if (!isMatch) {
+        return res.status(401).json({
+          success: false,
+          error:
+            'Invalid email or password.',
+        });
+      }
+
+      await createAuthSession(
+        req,
+        res,
+        user.id
+      );
+
+      return res.json({
+        success: true,
+        user,
+      });
+    } catch (error) {
+      next(error);
     }
+  }
+);
 
-    // Start session
-    await createAuthSession(req, res, userId);
+/*
+|--------------------------------------------------------------------------
+| LOGOUT
+|--------------------------------------------------------------------------
+*/
 
-    // Fetch user to return
+router.post(
+  '/logout',
+  requireAuth,
+  async (req, res, next) => {
+    try {
+      await prisma.session.update({
+        where: {
+          id: req.session.id,
+        },
+        data: {
+          isValid: false,
+        },
+      });
+
+      res.clearCookie('sid');
+
+      return res.json({
+        success: true,
+        message:
+          'Logged out successfully.',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/*
+|--------------------------------------------------------------------------
+| CURRENT USER
+|--------------------------------------------------------------------------
+*/
+
+router.get(
+  '/me',
+  requireAuth,
+  async (req, res) => {
+    return res.json({
+      success: true,
+      user: req.user,
+    });
+  }
+);
+
+/*
+|--------------------------------------------------------------------------
+| LINK GOOGLE
+|--------------------------------------------------------------------------
+*/
+
+router.post(
+  '/link-google',
+  requireAuth,
+  async (req, res, next) => {
+    try {
+      const { credential } =
+        req.body;
+
+      const userId =
+        req.user.id;
+
+      if (!credential) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'Google credential is required.',
+        });
+      }
+
+      const googleUser =
+        await verifyGoogleToken(
+          credential
+        );
+
+      const existingAccount =
+        await prisma.authAccount.findUnique({
+          where: {
+            provider_providerId: {
+              provider: 'GOOGLE',
+              providerId:
+                googleUser.sub,
+            },
+          },
+        });
+
+      if (existingAccount) {
+        return res.status(409).json({
+          success: false,
+          code:
+            'ACCOUNT_ALREADY_LINKED',
+          error:
+            'This Google account is already linked.',
+        });
+      }
+
+      const userGoogleAccount =
+        await prisma.authAccount.findUnique({
+          where: {
+            userId_provider: {
+              userId,
+              provider: 'GOOGLE',
+            },
+          },
+        });
+
+      if (userGoogleAccount) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'You already have a Google account linked.',
+        });
+      }
+
+      const updatedUser =
+        await prisma.$transaction(
+          async (tx) => {
+            await tx.user.update({
+              where: {
+                id: userId,
+              },
+              data: {
+                email:
+                  req.user.email ||
+                  googleUser.email,
+                name:
+                  req.user.name ||
+                  googleUser.name,
+                profileImage:
+                  req.user.profileImage ||
+                  googleUser.picture,
+
+                emailVerified: true,
+              },
+            });
+
+            await tx.authAccount.create({
+              data: {
+                userId,
+                provider: 'GOOGLE',
+                providerId:
+                  googleUser.sub,
+              },
+            });
+
+            return tx.user.findUnique({
+              where: {
+                id: userId,
+              },
+              include: {
+                accounts: {
+                  select: {
+                    provider: true,
+                  },
+                },
+              },
+            });
+          }
+        );
+
+      return res.json({
+        success: true,
+        user: updatedUser,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/*
+|--------------------------------------------------------------------------
+| FORGOT PASSWORD
+|--------------------------------------------------------------------------
+*/
+
+router.post(
+  '/forgot-password',
+  otpRequestLimiter,
+  async (req, res, next) => {
+    try {
+      const { email } = req.body;
+
+      if (!email || typeof email !== 'string') {
+        return res.status(400).json({
+          success: false,
+          error: 'Valid email is required.',
+        });
+      }
+
+      const cleanEmail = email.trim().toLowerCase();
+
+      const user = await prisma.user.findUnique({
+        where: {
+          email: cleanEmail,
+        },
+      });
+
+      // Do not reveal whether an account exists
+      if (!user) {
+        return res.json({
+          success: true,
+          message:
+            'If the email exists, a password reset OTP has been sent.',
+        });
+      }
+
+      // Generate 6-digit OTP
+      const otp = generateOTP();
+
+      // Hash OTP before storing
+      const otpHash = await hashValue(otp);
+
+      // OTP valid for 10 minutes
+      const expiresAt = new Date(
+        Date.now() + 10 * 60 * 1000
+      );
+
+      // Expire previous reset OTPs
+      await prisma.oTPVerification.updateMany({
+        where: {
+          email: cleanEmail,
+          verified: false,
+        },
+        data: {
+          expiresAt: new Date(Date.now() - 1000),
+        },
+      });
+
+      // Store new OTP
+      await prisma.oTPVerification.create({
+        data: {
+          email: cleanEmail,
+          otpHash,
+          expiresAt,
+        },
+      });
+
+      // Send through your existing Brevo email function
+      await sendEmailOTP(cleanEmail, otp);
+
+      if (
+        process.env.NODE_ENV === 'development' ||
+        process.env.NODE_ENV === 'test'
+      ) {
+        console.log(
+          `🔐 Password Reset OTP for ${cleanEmail}: ${otp}`
+        );
+      }
+
+      return res.json({
+        success: true,
+        message:
+          'A password reset OTP has been sent to your email.',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+router.post(
+  '/verify-reset-otp',
+  async (req, res, next) => {
+    try {
+      const { email, otp } = req.body;
+
+      if (!email || !otp) {
+        return res.status(400).json({
+          success: false,
+          error: 'Email and OTP are required.',
+        });
+      }
+
+      const cleanEmail = email.trim().toLowerCase();
+      const cleanOtp = String(otp).trim();
+
+      if (!/^\d{6}$/.test(cleanOtp)) {
+        return res.status(400).json({
+          success: false,
+          error: 'OTP must be exactly 6 digits.',
+        });
+      }
+
+      const verification =
+        await prisma.oTPVerification.findFirst({
+          where: {
+            email: cleanEmail,
+            verified: false,
+            expiresAt: {
+              gt: new Date(),
+            },
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+        });
+
+      if (!verification) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'OTP has expired or is invalid. Please request a new OTP.',
+        });
+      }
+
+      if (verification.attempts >= 5) {
+        return res.status(429).json({
+          success: false,
+          error:
+            'Too many incorrect attempts. Please request a new OTP.',
+        });
+      }
+
+      const isValid = await compareHash(
+        cleanOtp,
+        verification.otpHash
+      );
+
+      if (!isValid) {
+        await prisma.oTPVerification.update({
+          where: {
+            id: verification.id,
+          },
+          data: {
+            attempts: {
+              increment: 1,
+            },
+          },
+        });
+
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid OTP.',
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: 'OTP verified successfully.',
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+router.delete('/me', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
     const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        accounts: {
-          select: { provider: true },
-        },
-      },
-    });
-
-    res.json({
-      success: true,
-      user,
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * POST /api/auth/logout
- * Log out and invalidate session
- */
-router.post('/logout', requireAuth, async (req, res, next) => {
-  try {
-    const sessionId = req.session.id;
-
-    // Invalidate session in DB
-    await prisma.session.update({
-      where: { id: sessionId },
-      data: { isValid: false },
-    });
-
-    // Clear signed cookie
-    res.clearCookie('sid');
-
-    res.json({
-      success: true,
-      message: 'Logged out successfully.',
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * GET /api/auth/me
- * Get current authenticated user details
- */
-router.get('/me', requireAuth, async (req, res) => {
-  res.json({
-    success: true,
-    user: req.user,
-  });
-});
-
-/**
- * POST /api/auth/link-phone
- * Links phone authentication method to current authenticated user
- */
-router.post('/link-phone', requireAuth, async (req, res, next) => {
-  try {
-    const { phone, otp } = req.body;
-    const userId = req.user.id;
-
-    if (!phone || !otp) {
-      return res.status(400).json({
-        success: false,
-        error: 'Phone number and OTP code are required.',
-      });
-    }
-
-    // Verify phone account already linked to another User
-    const existingAccount = await prisma.authAccount.findUnique({
       where: {
-        provider_providerId: {
-          provider: 'PHONE',
-          providerId: phone,
-        },
+        id: userId,
       },
-    });
-
-    if (existingAccount) {
-      return res.status(409).json({
-        success: false,
-        code: 'ACCOUNT_ALREADY_LINKED',
-        error: 'This phone number is already linked to another TaskCircle account.',
-      });
-    }
-
-    // Also check if current user already has a phone linked
-    const userPhoneAccount = await prisma.authAccount.findUnique({
-      where: {
-        userId_provider: {
-          userId,
-          provider: 'PHONE',
-        },
-      },
-    });
-
-    if (userPhoneAccount) {
-      return res.status(400).json({
-        success: false,
-        error: 'You already have a phone number linked to this account.',
-      });
-    }
-
-    // Verify the OTP
-    const verification = await prisma.oTPVerification.findFirst({
-      where: {
-        phone,
-        verified: false,
-        expiresAt: { gte: new Date() },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (!verification) {
-      return res.status(400).json({
-        success: false,
-        error: 'OTP has expired or is invalid. Please request a new one.',
-      });
-    }
-
-    const isValid = await compareHash(otp, verification.otpHash);
-
-    if (!isValid) {
-      return res.status(400).json({
-        success: false,
-        error: 'Incorrect OTP code.',
-      });
-    }
-
-    // Invalidate OTP
-    await prisma.oTPVerification.update({
-      where: { id: verification.id },
-      data: { verified: true },
-    });
-
-    // Run in transaction to update user phone and add AuthAccount
-    const updatedUser = await prisma.$transaction(async (tx) => {
-      // Update phone field on user if it was empty
-      await tx.user.update({
-        where: { id: userId },
-        data: { phone },
-      });
-
-      // Create new AuthAccount relation
-      await tx.authAccount.create({
-        data: {
-          userId,
-          provider: 'PHONE',
-          providerId: phone,
-        },
-      });
-
-      return tx.user.findUnique({
-        where: { id: userId },
-        include: {
-          accounts: {
-            select: { provider: true },
+      select: {
+        id: true,
+        createdGroups: {
+          select: {
+            id: true,
           },
         },
-      });
+      },
     });
 
-    res.json({
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'User not found',
+      });
+    }
+
+    /*
+     * Delete groups created by this user first.
+     *
+     * Because Group relations use onDelete: Cascade,
+     * this also deletes:
+     * - GroupMember
+     * - JoinRequest
+     * - Tasks
+     * - Task notifications
+     */
+    if (user.createdGroups.length > 0) {
+      await prisma.group.deleteMany({
+        where: {
+          creatorId: userId,
+        },
+      });
+    }
+
+    /*
+     * Now delete the user.
+     *
+     * User relations using onDelete: Cascade will remove:
+     * - AuthAccount
+     * - Session
+     * - GroupMember
+     * - JoinRequest
+     * - Assigned Tasks
+     * - Created Tasks
+     * - Notifications
+     */
+    await prisma.user.delete({
+      where: {
+        id: userId,
+      },
+    });
+
+    return res.json({
       success: true,
-      user: updatedUser,
+      message:
+        'Account and owned groups deleted successfully',
     });
   } catch (error) {
-    next(error);
+    console.error('Delete account error:', error);
+
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to delete account',
+    });
   }
 });
+/*
+|--------------------------------------------------------------------------
+| RESET PASSWORD
+|--------------------------------------------------------------------------
+*/
 
-/**
- * POST /api/auth/link-google
- * Links Google authentication method to current authenticated user
- */
-router.post('/link-google', requireAuth, async (req, res, next) => {
-  try {
-    const { credential } = req.body;
-    const userId = req.user.id;
+router.post(
+  '/reset-password',
+  async (req, res, next) => {
+    try {
+      const {
+        email,
+        otp,
+        password,
+      } = req.body;
 
-    if (!credential) {
-      return res.status(400).json({
-        success: false,
-        error: 'Google credential (ID Token) is required.',
-      });
-    }
+      if (!email || !otp || !password) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'Email, OTP and new password are required.',
+        });
+      }
 
-    // Verify Google ID token
-    const googleUser = await verifyGoogleToken(credential);
+      if (password.length < 6) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'Password must be at least 6 characters long.',
+        });
+      }
 
-    // Verify Google account already linked to another User
-    const existingAccount = await prisma.authAccount.findUnique({
-      where: {
-        provider_providerId: {
-          provider: 'GOOGLE',
-          providerId: googleUser.sub,
-        },
-      },
-    });
+      const cleanEmail =
+        email.trim().toLowerCase();
 
-    if (existingAccount) {
-      return res.status(409).json({
-        success: false,
-        code: 'ACCOUNT_ALREADY_LINKED',
-        error: 'This Google account is already linked to another TaskCircle account.',
-      });
-    }
+      const cleanOtp =
+        String(otp).trim();
 
-    // Also check if current user already has Google linked
-    const userGoogleAccount = await prisma.authAccount.findUnique({
-      where: {
-        userId_provider: {
-          userId,
-          provider: 'GOOGLE',
-        },
-      },
-    });
-
-    if (userGoogleAccount) {
-      return res.status(400).json({
-        success: false,
-        error: 'You already have a Google account linked to this account.',
-      });
-    }
-
-    // Run in transaction to update user email/name/picture and add AuthAccount
-    const updatedUser = await prisma.$transaction(async (tx) => {
-      // Update email/name/profileImage if not already set
-      await tx.user.update({
-        where: { id: userId },
-        data: {
-          email: req.user.email || googleUser.email,
-          name: req.user.name || googleUser.name,
-          profileImage: req.user.profileImage || googleUser.picture,
-        },
-      });
-
-      // Create AuthAccount
-      await tx.authAccount.create({
-        data: {
-          userId,
-          provider: 'GOOGLE',
-          providerId: googleUser.sub,
-        },
-      });
-
-      return tx.user.findUnique({
-        where: { id: userId },
-        include: {
-          accounts: {
-            select: { provider: true },
+      const verification =
+        await prisma.oTPVerification.findFirst({
+          where: {
+            email: cleanEmail,
+            verified: false,
+            expiresAt: {
+              gt: new Date(),
+            },
           },
-        },
-      });
-    });
+          orderBy: {
+            createdAt: 'desc',
+          },
+        });
 
-    res.json({
-      success: true,
-      user: updatedUser,
-    });
-  } catch (error) {
-    next(error);
+      if (!verification) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'OTP is invalid or has expired.',
+        });
+      }
+
+      const isValid =
+        await compareHash(
+          cleanOtp,
+          verification.otpHash
+        );
+
+      if (!isValid) {
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid OTP.',
+        });
+      }
+
+      const user =
+        await prisma.user.findUnique({
+          where: {
+            email: cleanEmail,
+          },
+        });
+
+      if (!user) {
+        return res.status(400).json({
+          success: false,
+          error: 'Account not found.',
+        });
+      }
+
+      const passwordHash =
+        await hashValue(password);
+
+      await prisma.$transaction([
+        prisma.user.update({
+          where: {
+            id: user.id,
+          },
+          data: {
+            passwordHash,
+            resetToken: null,
+            resetTokenExpires: null,
+          },
+        }),
+
+        prisma.oTPVerification.update({
+          where: {
+            id: verification.id,
+          },
+          data: {
+            verified: true,
+          },
+        }),
+
+        prisma.session.updateMany({
+          where: {
+            userId: user.id,
+          },
+          data: {
+            isValid: false,
+          },
+        }),
+      ]);
+
+      return res.json({
+        success: true,
+        message:
+          'Password updated successfully. You can now log in.',
+      });
+    } catch (error) {
+      next(error);
+    }
   }
-});
+);
 
 export default router;
