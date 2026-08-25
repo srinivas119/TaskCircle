@@ -64,7 +64,7 @@ app.get('/api/test-route', (req, res) => {
     path: req.originalUrl
   });
 });
-app.use('/api/health', healthRoutes);
+
 app.use('/api/health', healthRoutes);
 
 app.use('/api/auth', authRoutes);
@@ -111,42 +111,40 @@ app.use(errorHandler);
 // LOCAL SERVER
 // =====================================================
 
-if (process.env.VERCEL !== '1') {
-  const server = app.listen(PORT, () => {
-    console.log('\n🚀 TaskCircle API Server');
-    console.log(
-      `   Environment: ${process.env.NODE_ENV || 'development'}`
-    );
-    console.log(`   Port:        ${PORT}`);
-    console.log(
-      `   Health:      http://localhost:${PORT}/api/health`
-    );
-    console.log(
-      `   Started:     ${new Date().toISOString()}\n`
-    );
+// =====================================================
+// SERVER
+// =====================================================
+
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log('\n🚀 TaskCircle API Server');
+  console.log(
+    `   Environment: ${process.env.NODE_ENV || 'development'}`
+  );
+  console.log(`   Port:        ${PORT}`);
+  console.log(
+    `   Health:      http://localhost:${PORT}/api/health`
+  );
+  console.log(
+    `   Started:     ${new Date().toISOString()}\n`
+  );
+});
+
+// =====================================================
+// GRACEFUL SHUTDOWN
+// =====================================================
+
+const gracefulShutdown = (signal) => {
+  console.log(
+    `\n${signal} received. Shutting down gracefully...`
+  );
+
+  server.close(() => {
+    console.log('Server closed.');
+    process.exit(0);
   });
+};
 
-  // ===================================================
-  // GRACEFUL SHUTDOWN
-  // ===================================================
-
-  const gracefulShutdown = (signal) => {
-    console.log(
-      `\n${signal} received. Shutting down gracefully...`
-    );
-
-    server.close(() => {
-      console.log('Server closed.');
-      process.exit(0);
-    });
-  };
-
-  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
-}
-
-// =====================================================
-// EXPORT FOR VERCEL
-// =====================================================
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 export default app;

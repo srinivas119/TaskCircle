@@ -43,15 +43,15 @@ const createAuthSession = async (req, res, userId) => {
     },
   });
 
- res.cookie('sid', sid, {
-  httpOnly: true,
-  secure: true,
-  sameSite: 'none',
-  signed: true,
-  expires: expiresAt,
-  path: '/',
-});
 
+   res.cookie('sid', sid, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none',
+    signed: true,
+    expires: expiresAt,
+    path: '/',
+  });
 const sendEmailOTP = async (email, otp) => {
   await transporter.sendMail({
     from: `"TaskCircle" <${process.env.EMAIL_USER}>`,

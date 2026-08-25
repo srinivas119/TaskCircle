@@ -4,9 +4,17 @@ import prisma from '../config/db.js';
  * Middleware to require user authentication.
  * Extracts session from signed cookies, validates it against DB, and populates req.user.
  */
+
 export const requireAuth = async (req, res, next) => {
   try {
+    console.log('=== AUTH DEBUG ===');
+    console.log('Cookie header:', req.headers.cookie);
+    console.log('Signed cookies:', req.signedCookies);
+    console.log('Unsigned cookies:', req.cookies);
+
     const sid = req.signedCookies?.sid;
+
+    console.log('SID:', sid);
 
     if (!sid) {
       return res.status(401).json({
@@ -31,42 +39,7 @@ export const requireAuth = async (req, res, next) => {
       },
     });
 
-    if (!session || !session.isValid) {
-      // Clear invalid cookie
-      res.clearCookie('sid');
-      return res.status(401).json({
-        success: false,
-        error: 'Invalid session.',
-      });
-    }
-
-    // Check expiration
-    if (session.expiresAt < new Date()) {
-      // Invalidate in DB and clear cookie
-      await prisma.session.update({
-        where: { id: session.id },
-        data: { isValid: false },
-      });
-      res.clearCookie('sid');
-      return res.status(401).json({
-        success: false,
-        error: 'Session has expired.',
-      });
-    }
-
-    // Attach user and session to request
-    req.user = session.user;
-    req.session = session;
-
-    next();
-  } catch (error) {
-    console.error('Auth middleware error:', error);
-    res.status(500).json({
-      success: false,
-      error: 'Internal server error during authentication.',
-    });
-  }
-};
+    // ... keep the rest of your existing code
 
 /**
  * Optional authentication middleware.
