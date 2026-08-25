@@ -57,7 +57,13 @@ app.get('/api/test-health', (req, res) => {
     message: 'API path works'
   });
 });
-
+app.get('/api/test-route', (req, res) => {
+  res.json({
+    success: true,
+    message: 'API routing works',
+    path: req.originalUrl
+  });
+});
 app.use('/api/health', healthRoutes);
 app.use('/api/health', healthRoutes);
 
