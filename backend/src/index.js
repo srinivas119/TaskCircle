@@ -59,7 +59,12 @@ app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 
 app.use('/api/groups', groupsRoutes);
-
+app.get('/test', (req, res) => {
+  res.json({
+    success: true,
+    message: 'Express routing works'
+  });
+});
 app.use('/api', notificationRoutes);
 
 app.use('/api', taskRoutes);
