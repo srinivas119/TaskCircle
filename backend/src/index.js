@@ -51,7 +51,14 @@ app.use('/uploads', express.static('uploads'));
 // =====================================================
 // ROUTES
 // =====================================================
+app.get('/api/test-health', (req, res) => {
+  res.json({
+    success: true,
+    message: 'API path works'
+  });
+});
 
+app.use('/api/health', healthRoutes);
 app.use('/api/health', healthRoutes);
 
 app.use('/api/auth', authRoutes);
@@ -59,12 +66,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/profile', profileRoutes);
 
 app.use('/api/groups', groupsRoutes);
-app.get('/test', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Express routing works'
-  });
-});
+
 app.use('/api', notificationRoutes);
 
 app.use('/api', taskRoutes);
