@@ -14,14 +14,12 @@ import notificationRoutes from './routes/notificationRoutes.js';
 
 import errorHandler from './middleware/errorHandler.js';
 
-import {
-  startNotificationScheduler,
-} from './utils/notificationScheduler.js';
-
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// --------------- Middleware ---------------
+// =====================================================
+// MIDDLEWARE
+// =====================================================
 
 app.use(helmet());
 
@@ -44,10 +42,15 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve static profile image uploads
+// =====================================================
+// STATIC FILES
+// =====================================================
+
 app.use('/uploads', express.static('uploads'));
 
-// --------------- Routes ---------------
+// =====================================================
+// ROUTES
+// =====================================================
 
 app.use('/api/health', healthRoutes);
 
@@ -55,28 +58,28 @@ app.use('/api/auth', authRoutes);
 
 app.use('/api/profile', profileRoutes);
 
-// IMPORTANT:
-// Groups must be registered before generic /api routes.
-// Otherwise /api/groups can be interpreted as a task ID.
 app.use('/api/groups', groupsRoutes);
 
-// Notifications
 app.use('/api', notificationRoutes);
 
-// Tasks
 app.use('/api', taskRoutes);
 
-// --------------- Root route ---------------
+// =====================================================
+// ROOT ROUTE
+// =====================================================
 
 app.get('/', (req, res) => {
-  res.json({
+  res.status(200).json({
+    success: true,
     message: 'TaskCircle API',
     version: '1.0.0',
     docs: '/api/health',
   });
 });
 
-// --------------- 404 Handler ---------------
+// =====================================================
+// 404 HANDLER
+// =====================================================
 
 app.use((req, res) => {
   res.status(404).json({
@@ -85,11 +88,15 @@ app.use((req, res) => {
   });
 });
 
-// --------------- Global Error Handler ---------------
+// =====================================================
+// GLOBAL ERROR HANDLER
+// =====================================================
 
 app.use(errorHandler);
 
-// --------------- Start Server ---------------
+// =====================================================
+// LOCAL SERVER
+// =====================================================
 
 if (process.env.VERCEL !== '1') {
   const server = app.listen(PORT, () => {
@@ -105,18 +112,28 @@ if (process.env.VERCEL !== '1') {
       `   Started:     ${new Date().toISOString()}\n`
     );
   });
-// --------------- Graceful Shutdown ---------------
 
-const gracefulShutdown = (signal) => {
-  console.log(`\n${signal} received. Shutting down gracefully...`);
+  // ===================================================
+  // GRACEFUL SHUTDOWN
+  // ===================================================
 
-  server.close(() => {
-    console.log('Server closed.');
-    process.exit(0);
-  });
-};
+  const gracefulShutdown = (signal) => {
+    console.log(
+      `\n${signal} received. Shutting down gracefully...`
+    );
 
-process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
-process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+    server.close(() => {
+      console.log('Server closed.');
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+}
+
+// =====================================================
+// EXPORT FOR VERCEL
+// =====================================================
 
 export default app;
