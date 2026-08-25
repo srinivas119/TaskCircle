@@ -1,10 +1,15 @@
+import app from '../src/index.js';
+
 export default function handler(req, res) {
-  res.status(200).json({
-    message: "Vercel function reached",
-    url: req.url,
-    originalUrl: req.originalUrl,
-    method: req.method,
-    query: req.query,
-    path: req.path
-  });
+  const path = req.query['...path'];
+
+  if (path) {
+    const cleanPath = Array.isArray(path)
+      ? `/${path.join('/')}`
+      : `/${path}`;
+
+    req.url = cleanPath;
+  }
+
+  return app(req, res);
 }
