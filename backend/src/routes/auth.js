@@ -43,14 +43,14 @@ const createAuthSession = async (req, res, userId) => {
     },
   });
 
-  res.cookie('sid', sid, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    signed: true,
-    expires: expiresAt,
-  });
-};
+ res.cookie('sid', sid, {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'none',
+  signed: true,
+  expires: expiresAt,
+  path: '/',
+});
 
 const sendEmailOTP = async (email, otp) => {
   await transporter.sendMail({
