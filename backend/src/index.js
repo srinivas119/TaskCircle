@@ -91,20 +91,20 @@ app.use(errorHandler);
 
 // --------------- Start Server ---------------
 
-const server = app.listen(PORT, () => {
-  console.log('\n🚀 TaskCircle API Server');
-  console.log(
-    `   Environment: ${process.env.NODE_ENV || 'development'}`
-  );
-  console.log(`   Port:        ${PORT}`);
-  console.log(
-    `   Health:      http://localhost:${PORT}/api/health`
-  );
-  console.log(
-    `   Started:     ${new Date().toISOString()}\n`
-  );
-});
-
+if (process.env.VERCEL !== '1') {
+  const server = app.listen(PORT, () => {
+    console.log('\n🚀 TaskCircle API Server');
+    console.log(
+      `   Environment: ${process.env.NODE_ENV || 'development'}`
+    );
+    console.log(`   Port:        ${PORT}`);
+    console.log(
+      `   Health:      http://localhost:${PORT}/api/health`
+    );
+    console.log(
+      `   Started:     ${new Date().toISOString()}\n`
+    );
+  });
 // --------------- Graceful Shutdown ---------------
 
 const gracefulShutdown = (signal) => {
