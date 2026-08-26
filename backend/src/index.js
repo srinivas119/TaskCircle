@@ -50,22 +50,31 @@ if (process.env.REDIS_URL) {
 app.use(helmet());
 
 app.use(
-  cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (mobile apps, curl, Render health checks)
-      if (!origin) return callback(null, true);
-      const allowed = [
-        process.env.FRONTEND_URL,
-        'http://localhost:5173',
-        'http://localhost:3000',
-      ].filter(Boolean);
-      if (allowed.includes(origin)) {
-        return callback(null, true);
-      }
-      return callback(new Error(`CORS: Origin ${origin} not allowed`));
-    },
-    credentials: true,
-  })
+    cors({
+        origin: (origin, callback) => {
+            // Allow requests with no origin
+            // (mobile apps, curl, Render health checks, etc.)
+            if (!origin) {
+                return callback(null, true);
+            }
+
+            const allowed = [
+                process.env.FRONTEND_URL,
+                'http://localhost',
+                'http://localhost:5173',
+                'http://localhost:3000',
+            ].filter(Boolean);
+
+            if (allowed.includes(origin)) {
+                return callback(null, true);
+            }
+
+            return callback(
+                new Error(`CORS: Origin ${origin} not allowed`)
+            );
+        },
+        credentials: true,
+    })
 );
 
 app.use(morgan('dev'));
