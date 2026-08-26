@@ -70,6 +70,9 @@ app.use(
 
 app.use(morgan('dev'));
 
+// Detect if running on Render (auto-injected) or explicitly set as production
+const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true';
+
 app.use(
   session({
     store: sessionStore,
@@ -79,8 +82,10 @@ app.use(
     name: 'sid',
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      // CRITICAL: Must be true + sameSite=none for cross-domain (Vercel → Render)
+      // Render auto-sets RENDER=true even if NODE_ENV is not explicitly set
+      secure: isProduction,
+      sameSite: isProduction ? 'none' : 'lax',
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     }
   })
@@ -164,9 +169,8 @@ app.use(errorHandler);
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('\n🚀 TaskCircle API Server');
-  console.log(
-    `   Environment: ${process.env.NODE_ENV || 'development'}`
-  );
+  console.log(`   Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`   Production Mode: ${isProduction} (secure cookies: ${isProduction})`);
   console.log(`   Port:        ${PORT}`);
   console.log(`   Frontend URL: ${process.env.FRONTEND_URL || '(not set)'}`);
   console.log(`   Redis URL set: ${!!process.env.REDIS_URL}`);
