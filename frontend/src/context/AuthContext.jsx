@@ -167,10 +167,18 @@ export const AuthProvider = ({ children }) => {
       );
 
       if (response.data?.success) {
+        // If backend auto-logged in the user after OTP verification,
+        // set the user in context immediately so no separate login is needed.
+        if (response.data?.autoLoggedIn && response.data?.user) {
+          setUser(response.data.user);
+        }
+
         setLoading(false);
 
         return {
           success: true,
+          autoLoggedIn: response.data?.autoLoggedIn || false,
+          user: response.data?.user || null,
           message:
             response.data?.message ||
             'Email verified successfully.',

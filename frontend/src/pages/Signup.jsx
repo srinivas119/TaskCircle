@@ -183,14 +183,19 @@ function Signup() {
       );
 
       if (result?.success) {
-        navigate('/login', {
-          replace: true,
-          state: {
-            message:
-              'Email verified successfully. You can now login.',
-            email: verificationEmail,
-          },
-        });
+        if (result?.autoLoggedIn) {
+          // User was auto-logged in after OTP — go straight to the app
+          navigate('/', { replace: true });
+        } else {
+          navigate('/login', {
+            replace: true,
+            state: {
+              message:
+                'Email verified successfully. You can now login.',
+              email: verificationEmail,
+            },
+          });
+        }
       }
     } catch (err) {
       console.error(

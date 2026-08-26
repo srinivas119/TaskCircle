@@ -540,10 +540,33 @@ router.post(
         }),
       ]);
 
-      return res.json({
-        success: true,
-        message:
-          'Email verified successfully. You can now log in.',
+      // Auto-login: set session so the user is immediately authenticated
+      // after verifying their email (no separate login step needed)
+      req.session.userId = user.id;
+
+      const verifiedUser = await prisma.user.findUnique({
+        where: { id: user.id },
+        include: {
+          accounts: {
+            select: { provider: true },
+          },
+        },
+      });
+
+      req.session.save((err) => {
+        if (err) {
+          // Session save failed — still verified, just ask them to log in
+          return res.json({
+            success: true,
+            message: 'Email verified successfully. Please log in.',
+          });
+        }
+        return res.json({
+          success: true,
+          autoLoggedIn: true,
+          user: verifiedUser,
+          message: 'Email verified successfully.',
+        });
       });
     } catch (error) {
       next(error);
