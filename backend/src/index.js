@@ -6,7 +6,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import session from 'express-session';
 import { createClient } from 'redis';
-import RedisStore from 'connect-redis';
+import { RedisStore } from 'connect-redis';
 
 import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
