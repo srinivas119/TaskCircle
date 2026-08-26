@@ -4,6 +4,9 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import session from 'express-session';
+import { createClient } from 'redis';
+import RedisStore from 'connect-redis';
 
 import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
@@ -15,7 +18,29 @@ import notificationRoutes from './routes/notificationRoutes.js';
 import errorHandler from './middleware/errorHandler.js';
 
 const app = express();
+app.set('trust proxy', 1); // Trust the Render reverse proxy for secure cookies
 const PORT = process.env.PORT || 5000;
+
+// =====================================================
+// REDIS SETUP
+// =====================================================
+
+let sessionStore;
+
+if (process.env.REDIS_URL) {
+  const redisClient = createClient({
+    url: process.env.REDIS_URL
+  });
+
+  redisClient.on('error', (err) => console.log('Redis Client Error:', err.message));
+  redisClient.connect().catch(console.error);
+
+  sessionStore = new RedisStore({ client: redisClient });
+  console.log('📦 Session Store: Redis');
+} else {
+  console.warn('⚠️ No REDIS_URL provided. Falling back to MemoryStore (Not for production).');
+  // sessionStore remains undefined, which makes express-session use its default MemoryStore
+}
 
 // =====================================================
 // MIDDLEWARE
@@ -33,10 +58,19 @@ app.use(
 app.use(morgan('dev'));
 
 app.use(
-  cookieParser(
-    process.env.SESSION_SECRET ||
-      'dev-session-cookie-signing-secret-key'
-  )
+  session({
+    store: sessionStore,
+    secret: process.env.SESSION_SECRET || 'dev-session-cookie-signing-secret-key',
+    resave: false,
+    saveUninitialized: false,
+    name: 'sid',
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    }
+  })
 );
 
 app.use(express.json());

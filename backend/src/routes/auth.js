@@ -25,33 +25,7 @@ const otpRequestLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-const createAuthSession = async (req, res, userId) => {
-  const sid = generateSessionToken();
-
-  const expiresAt = new Date(
-    Date.now() + 7 * 24 * 60 * 60 * 1000
-  );
-
-  await prisma.session.create({
-    data: {
-      sid,
-      userId,
-      expiresAt,
-      userAgent: req.headers['user-agent'],
-      ipAddress:
-        req.ip || req.connection?.remoteAddress,
-    },
-  });
-
-
-   res.cookie('sid', sid, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-    signed: true,
-    expires: expiresAt,
-    path: '/',
-  });
+// removed createAuthSession
 const sendEmailOTP = async (email, otp) => {
   await transporter.sendMail({
     from: `"TaskCircle" <${process.env.EMAIL_USER}>`,
@@ -213,11 +187,7 @@ router.post('/google', async (req, res, next) => {
       userId = newUser.id;
     }
 
-    await createAuthSession(
-      req,
-      res,
-      userId
-    );
+    req.session.userId = userId;
 
     const user =
       await prisma.user.findUnique({
@@ -797,11 +767,7 @@ router.post(
         });
       }
 
-      await createAuthSession(
-        req,
-        res,
-        user.id
-      );
+      req.session.userId = user.id;
 
       return res.json({
         success: true,
@@ -824,21 +790,16 @@ router.post(
   requireAuth,
   async (req, res, next) => {
     try {
-      await prisma.session.update({
-        where: {
-          id: req.session.id,
-        },
-        data: {
-          isValid: false,
-        },
-      });
-
-      res.clearCookie('sid');
-
-      return res.json({
-        success: true,
-        message:
-          'Logged out successfully.',
+      req.session.destroy((err) => {
+        if (err) {
+          return next(err);
+        }
+        res.clearCookie('sid');
+        return res.json({
+          success: true,
+          message:
+            'Logged out successfully.',
+        });
       });
     } catch (error) {
       next(error);
@@ -1349,14 +1310,7 @@ router.post(
           },
         }),
 
-        prisma.session.updateMany({
-          where: {
-            userId: user.id,
-          },
-          data: {
-            isValid: false,
-          },
-        }),
+
       ]);
 
       return res.json({

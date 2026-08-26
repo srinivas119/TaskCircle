@@ -2,44 +2,43 @@ import prisma from '../config/db.js';
 
 /**
  * Middleware to require user authentication.
- * Extracts session from signed cookies, validates it against DB, and populates req.user.
+ * Extracts session using express-session and populates req.user.
  */
-
 export const requireAuth = async (req, res, next) => {
   try {
-    console.log('=== AUTH DEBUG ===');
-    console.log('Cookie header:', req.headers.cookie);
-    console.log('Signed cookies:', req.signedCookies);
-    console.log('Unsigned cookies:', req.cookies);
-
-    const sid = req.signedCookies?.sid;
-
-    console.log('SID:', sid);
-
-    if (!sid) {
+    if (!req.session || !req.session.userId) {
       return res.status(401).json({
         success: false,
         error: 'Authentication required. No session found.',
       });
     }
 
-    // Find valid session
-    const session = await prisma.session.findUnique({
-      where: { sid },
+    const user = await prisma.user.findUnique({
+      where: { id: req.session.userId },
       include: {
-        user: {
-          include: {
-            accounts: {
-              select: {
-                provider: true,
-              },
-            },
+        accounts: {
+          select: {
+            provider: true,
           },
         },
       },
     });
 
-    // ... keep the rest of your existing code
+    if (!user) {
+      req.session.destroy();
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid session. User not found.',
+      });
+    }
+
+    req.user = user;
+    next();
+  } catch (error) {
+    console.error('Auth middleware error:', error);
+    res.status(500).json({ success: false, error: 'Server error during authentication.' });
+  }
+};
 
 /**
  * Optional authentication middleware.
@@ -47,27 +46,20 @@ export const requireAuth = async (req, res, next) => {
  */
 export const optionalAuth = async (req, res, next) => {
   try {
-    const sid = req.signedCookies?.sid;
-
-    if (sid) {
-      const session = await prisma.session.findUnique({
-        where: { sid },
+    if (req.session && req.session.userId) {
+      const user = await prisma.user.findUnique({
+        where: { id: req.session.userId },
         include: {
-          user: {
-            include: {
-              accounts: {
-                select: {
-                  provider: true,
-                },
-              },
+          accounts: {
+            select: {
+              provider: true,
             },
           },
         },
       });
 
-      if (session && session.isValid && session.expiresAt > new Date()) {
-        req.user = session.user;
-        req.session = session;
+      if (user) {
+        req.user = user;
       }
     }
     next();
