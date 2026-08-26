@@ -7,7 +7,6 @@ import {
   generateOTP,
   hashValue,
   compareHash,
-  generateSessionToken,
 } from '../utils/crypto.js';
 import transporter from '../utils/mail.js';
 
@@ -203,9 +202,12 @@ router.post('/google', async (req, res, next) => {
         },
       });
 
-    return res.json({
-      success: true,
-      user,
+    req.session.save((err) => {
+      if (err) return next(err);
+      return res.json({
+        success: true,
+        user,
+      });
     });
   } catch (error) {
     next(error);
@@ -769,9 +771,12 @@ router.post(
 
       req.session.userId = user.id;
 
-      return res.json({
-        success: true,
-        user,
+      req.session.save((err) => {
+        if (err) return next(err);
+        return res.json({
+          success: true,
+          user,
+        });
       });
     } catch (error) {
       next(error);
@@ -789,21 +794,17 @@ router.post(
   '/logout',
   requireAuth,
   async (req, res, next) => {
-    try {
-      req.session.destroy((err) => {
-        if (err) {
-          return next(err);
-        }
-        res.clearCookie('sid');
-        return res.json({
-          success: true,
-          message:
-            'Logged out successfully.',
-        });
+    req.session.destroy((err) => {
+      if (err) {
+        return next(err);
+      }
+      res.clearCookie('sid');
+      return res.json({
+        success: true,
+        message:
+          'Logged out successfully.',
       });
-    } catch (error) {
-      next(error);
-    }
+    });
   }
 );
 

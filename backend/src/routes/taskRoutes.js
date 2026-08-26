@@ -125,10 +125,12 @@ router.post('/tasks', requireAuth, async (req, res) => {
     |
     */
 
-    if (
-      currentMember.role !== 'ADMIN' &&
-      currentMember.role !== 'MODERATOR'
-    ) {
+    const canAssign =
+      currentMember.role === 'ADMIN' ||
+      currentMember.role === 'MODERATOR' ||
+      currentMember.canAssignTasks === true;
+
+    if (!canAssign) {
       return res.status(403).json({
         success: false,
         error: 'You do not have permission to assign tasks',

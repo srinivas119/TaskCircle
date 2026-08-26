@@ -1,6 +1,5 @@
 import 'dotenv/config';
 import express from 'express';
-import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
@@ -33,7 +32,9 @@ if (process.env.REDIS_URL) {
   });
 
   redisClient.on('error', (err) => console.log('Redis Client Error:', err.message));
-  redisClient.connect().catch(console.error);
+  redisClient.connect()
+    .then(() => console.log('✅ Redis connected successfully'))
+    .catch(console.error);
 
   sessionStore = new RedisStore({ client: redisClient });
   console.log('📦 Session Store: Redis');
@@ -50,7 +51,19 @@ app.use(helmet());
 
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: (origin, callback) => {
+      // Allow requests with no origin (mobile apps, curl, Render health checks)
+      if (!origin) return callback(null, true);
+      const allowed = [
+        process.env.FRONTEND_URL,
+        'http://localhost:5173',
+        'http://localhost:3000',
+      ].filter(Boolean);
+      if (allowed.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS: Origin ${origin} not allowed`));
+    },
     credentials: true,
   })
 );
