@@ -168,6 +168,8 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     `   Environment: ${process.env.NODE_ENV || 'development'}`
   );
   console.log(`   Port:        ${PORT}`);
+  console.log(`   Frontend URL: ${process.env.FRONTEND_URL || '(not set)'}`);
+  console.log(`   Redis URL set: ${!!process.env.REDIS_URL}`);
   console.log(
     `   Health:      http://localhost:${PORT}/api/health`
   );

@@ -827,6 +827,24 @@ router.get(
 
 /*
 |--------------------------------------------------------------------------
+| DEBUG SESSION (Temporary — remove after confirming production works)
+|--------------------------------------------------------------------------
+*/
+
+router.get('/debug-session', (req, res) => {
+  res.json({
+    success: true,
+    sessionId: req.session?.id || null,
+    userId: req.session?.userId || null,
+    cookieReceived: !!req.headers.cookie,
+    nodeEnv: process.env.NODE_ENV,
+    frontendUrl: process.env.FRONTEND_URL || '(not set)',
+    redisUrlSet: !!process.env.REDIS_URL,
+  });
+});
+
+/*
+|--------------------------------------------------------------------------
 | LINK GOOGLE
 |--------------------------------------------------------------------------
 */
